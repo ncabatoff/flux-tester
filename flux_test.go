@@ -34,15 +34,17 @@ const (
 	syncTimeout             = 120 * time.Second
 	automationUpdateTimeout = 180 * time.Second
 	fluxImage               = "quay.io/weaveworks/flux:latest"
+	fluxOperatorImage       = "quay.io/weaveworks/helm-operator:latest"
 	fluxPort                = "30080"
 	gitRepoPathOnNode       = "/home/docker/flux.git"
-	fluxNamespace           = "kube-system"
-	helloworldDeploy        = "helloworld-deployment.yaml"
-	helloworldDeployTpl     = helloworldDeploy + ".tpl"
+	fluxNamespace           = "flux"
 	helloworldImageTag      = "master-a000001"
 	sidecarImageTag         = "master-a000001"
 	appNamespace            = "default"
 	fluxSyncTag             = "flux-sync"
+
+	helmFluxNamespace = "flux"
+	helmVersion       = "v2.9.0"
 )
 
 type (
@@ -175,11 +177,57 @@ func (s *setup) svcurl() string {
 	return u.String()
 }
 
+func (s *setup) helmSubCmd(subcmd string, args ...string) []string {
+	return append([]string{"helm",
+		"--kube-context", s.profile,
+		"--home", filepath.Join(s.workdir, "helm"),
+		subcmd}, args...)
+}
+
+func (s *setup) helm(ctx context.Context, subcmd string, args ...string) (string, error) {
+	allargs := s.helmSubCmd(subcmd, args...)
+	return envExec(ctx, nil, nil, allargs[0], allargs[1:]...)
+}
+
+func (s *setup) helmOrDie(ctx context.Context, subcmd string, args ...string) string {
+	return strOrDie(s.helm(ctx, subcmd, args...))
+}
+
+func (s *setup) helmIgnoreErr(ctx context.Context, subcmd string, args ...string) string {
+	return ignoreErr(s.helm(ctx, subcmd, args...))
+}
+
+func (s *setup) getHelmVersion(ctx context.Context, clientOrServer string) string {
+	re := regexp.MustCompile(`Version{SemVer: *"([^"]+)"`)
+	helmout := s.helmIgnoreErr(ctx, "version", "--"+clientOrServer, "--tiller-connection-timeout", "5")
+	version := re.FindStringSubmatch(helmout)
+	if len(version) == 2 {
+		return version[1]
+	}
+	return ""
+}
+
+func (s *setup) initHelm(ctx context.Context) {
+	s.kubectlOrDie(ctx, nil, "kube-system", "create", "sa", "tiller")
+	s.kubectlOrDie(ctx, nil, "kube-system", "create", "clusterrolebinding", "tiller-cluster-rule",
+		"--clusterrole=cluster-admin", "--serviceaccount=kube-system:tiller")
+	s.helmOrDie(ctx, "init", "--wait", "--skip-refresh", "--upgrade", "--service-account", "tiller")
+}
+
 func (s *setup) run() {
 	s.clusterIP = strings.TrimSpace(s.minikubeOrDie(context.TODO(), "ip"))
 
+	s.verifyKubernetes(context.Background())
+
+	if helmverser := global.getHelmVersion(context.Background(), "server"); helmverser == "" {
+		s.initHelm(context.TODO())
+	} else if helmverser != helmVersion {
+		log.Fatalf("requires helm server version %s, got: %v", helmVersion, helmverser)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), imageSetupTimeout)
 	s.loadDockerInMinikube(ctx, fluxImage)
+	s.loadDockerInMinikube(ctx, fluxOperatorImage)
 	cancel()
 
 	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", s.clusterIP)
@@ -239,22 +287,26 @@ func (h *harness) initGitRepoLocal(ctx context.Context) {
 }
 
 func (h *harness) writeHelloWorldDeployment() string {
-	tpl, err := template.ParseFiles(helloworldDeployTpl)
+	helloworldDeploy := "helloworld-deployment.yaml"
+	helloworldDeployTpl := helloworldDeploy + ".tpl"
+	helloworldDeployTplPath := filepath.Join("nohelm", helloworldDeployTpl)
+
+	tpl, err := template.ParseFiles(helloworldDeployTplPath)
 	if err != nil {
-		log.Fatalf("Unable to parse template %q: %v", helloworldDeployTpl, err)
+		h.t.Fatalf("Unable to parse template %q: %v", helloworldDeployTplPath, err)
 	}
 
 	foutpath := filepath.Join(h.repodir, helloworldDeploy)
 	fout, err := os.Create(foutpath)
 	if err != nil {
-		log.Fatalf("Unable to write deployment %q: %v", foutpath, err)
+		h.t.Fatalf("Unable to write deployment %q: %v", foutpath, err)
 	}
 
 	tpl.ExecuteTemplate(fout, helloworldDeployTpl, struct{ ImageTag string }{helloworldImageTag})
 
 	err = fout.Close()
 	if err != nil {
-		log.Fatalf("Unable to close deployment %q: %v", foutpath, err)
+		h.t.Fatalf("Unable to close deployment %q: %v", foutpath, err)
 	}
 	return helloworldDeploy
 }
@@ -262,16 +314,17 @@ func (h *harness) writeHelloWorldDeployment() string {
 func (h *harness) writeFluxDeployment() string {
 	fluxDeploy := "flux-deploy-all.yaml"
 	fluxDeployTpl := fluxDeploy + ".tpl"
+	fluxDeployTplPath := filepath.Join("nohelm", fluxDeployTpl)
 
-	tpl, err := template.ParseFiles(fluxDeployTpl)
+	tpl, err := template.ParseFiles(fluxDeployTplPath)
 	if err != nil {
-		log.Fatalf("Unable to parse template %q: %v", fluxDeployTpl, err)
+		h.t.Fatalf("Unable to parse template %q: %v", fluxDeployTplPath, err)
 	}
 
 	foutpath := filepath.Join(h.workdir, fluxDeploy)
 	fout, err := os.Create(foutpath)
 	if err != nil {
-		log.Fatalf("Unable to write deployment %q: %v", foutpath, err)
+		h.t.Fatalf("Unable to write deployment %q: %v", foutpath, err)
 	}
 
 	tpl.ExecuteTemplate(fout, fluxDeployTpl, struct {
@@ -282,7 +335,7 @@ func (h *harness) writeFluxDeployment() string {
 
 	err = fout.Close()
 	if err != nil {
-		log.Fatalf("Unable to close deployment %q: %v", foutpath, err)
+		h.t.Fatalf("Unable to close deployment %q: %v", foutpath, err)
 	}
 	return foutpath
 }
@@ -305,17 +358,17 @@ func (h *harness) waitForSync(ctx context.Context, targetRevSource string) bool 
 				return true
 			}
 		case <-ctx.Done():
-			log.Fatalf("Failed to sync to revision %s", headRev)
+			h.t.Fatalf("Failed to sync to revision %s", headRev)
 		}
 
 	}
 }
 
 func (h *harness) waitForUpstreamCommits(ctx context.Context, mincount int) bool {
-	t := time.NewTicker(time.Second)
+	ticker := time.NewTicker(time.Second)
 	for {
 		select {
-		case <-t.C:
+		case <-ticker.C:
 			h.gitOrDie(ctx, "fetch", "--tags")
 			strcount := h.gitIgnoreErr(ctx, "rev-list", "--count", "HEAD.."+fluxSyncTag)
 			if strcount != "" {
@@ -328,7 +381,7 @@ func (h *harness) waitForUpstreamCommits(ctx context.Context, mincount int) bool
 				}
 			}
 		case <-ctx.Done():
-			log.Fatalf("Failed to find at least %d commits", mincount)
+			h.t.Fatalf("Failed to find at least %d commits", mincount)
 		}
 
 	}
@@ -388,14 +441,15 @@ func TestMain(m *testing.M) {
 	}
 
 	global.verifyMinikube(context.Background())
+	if helmvercli := global.getHelmVersion(context.Background(), "client"); helmvercli != helmVersion {
+		log.Fatalf("requires helm client version %s, got: %v", helmVersion, helmvercli)
+	}
 
 	if *flagStartMinikube {
 		ctx, cancel := context.WithTimeout(context.Background(), k8sSetupTimeout)
 		global.startMinikube(ctx)
 		cancel()
 	}
-
-	global.verifyKubernetes(context.Background())
 
 	global.run()
 	os.Exit(m.Run())

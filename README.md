@@ -21,6 +21,14 @@ Minor differences:
   tweak: the second wait_for_sync need to look at a different revset than
   what HEAD points to, since a git fetch doesn't seem to be update that.
 
+New functionality:
+- Adds preliminary support for testing flux with the helm-operator.
+  Currently TestChart gets as far as deploying a chart via git which
+  flux/helm-operator turns into a helm release.  The flux agent doesn't
+  report this as a controller though, so the test never succeeds.
+  Relies on [#1099](https://github.com/weaveworks/flux/pull/1099)
+  and [#1100](https://github.com/weaveworks/flux/pull/1100).
+
 ## Background
 
 There's a PR ([#921](https://github.com/weaveworks/flux/pull/921)) which 
