@@ -37,7 +37,7 @@ const (
 	fluxOperatorImage       = "quay.io/weaveworks/helm-operator:latest"
 	fluxPort                = "30080"
 	gitRepoPathOnNode       = "/home/docker/flux.git"
-	fluxNamespace           = "flux"
+	fluxNamespace           = "kube-system"
 	helloworldImageTag      = "master-a000001"
 	sidecarImageTag         = "master-a000001"
 	appNamespace            = "default"
@@ -45,6 +45,7 @@ const (
 
 	helmFluxNamespace = "flux"
 	helmVersion       = "v2.9.0"
+	helmFluxRelease   = "cd"
 )
 
 type (
@@ -214,6 +215,18 @@ func (s *setup) initHelm(ctx context.Context) {
 	s.helmOrDie(ctx, "init", "--wait", "--skip-refresh", "--upgrade", "--service-account", "tiller")
 }
 
+func (s *setup) ssh(namespace string) {
+	secretName := "flux-git-deploy"
+	s.kubectlIgnoreErrs(context.TODO(), nil, namespace, "delete", "secret", secretName)
+	s.kubectlOrDie(context.TODO(), nil, namespace, "create", "secret", "generic", secretName, "--from-file",
+		fmt.Sprintf("identity=%s", s.sshPrivateKeyPath()))
+
+	configMapName := "ssh-known-hosts"
+	s.kubectlIgnoreErrs(context.TODO(), nil, namespace, "delete", "configmap", configMapName)
+	s.kubectlOrDie(context.TODO(), nil, namespace, "create", "configmap", configMapName, "--from-file",
+		fmt.Sprintf("known_hosts=%s", s.knownHostsPath()))
+}
+
 func (s *setup) run() {
 	s.clusterIP = strings.TrimSpace(s.minikubeOrDie(context.TODO(), "ip"))
 
@@ -233,15 +246,16 @@ func (s *setup) run() {
 	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", s.clusterIP)
 	ioutil.WriteFile(s.knownHostsPath(), []byte(knownHostsContent), 0600)
 
-	secretName := "flux-git-deploy"
-	s.kubectlIgnoreErrs(context.TODO(), nil, fluxNamespace, "delete", "secret", secretName)
-	s.kubectlOrDie(context.TODO(), nil, fluxNamespace, "create", "secret", "generic", secretName, "--from-file",
-		fmt.Sprintf("identity=%s", s.sshPrivateKeyPath()))
+	// Make sure that if helm flux is sitting around due to a previous failed
+	// test, it won't interfere with upcoming tests.
+	s.helmOrDie(context.Background(), "init", "--client-only")
+	s.helmIgnoreErr(context.TODO(), "delete", "--purge", helmFluxRelease)
 
-	configMapName := "ssh-known-hosts"
-	s.kubectlIgnoreErrs(context.TODO(), nil, fluxNamespace, "delete", "configmap", configMapName)
-	s.kubectlOrDie(context.TODO(), nil, fluxNamespace, "create", "configmap", configMapName, "--from-file",
-		fmt.Sprintf("known_hosts=%s", s.knownHostsPath()))
+	// out := strOrDie(writeNamespace(s.workdir))
+	// s.kubectlOrDie(context.TODO(), nil, "kube-system", "apply", "-f", out)
+
+	s.ssh(fluxNamespace)
+	s.ssh(helmFluxNamespace)
 }
 
 func (h *harness) initGitRepoOnNode(ctx context.Context) {
@@ -286,62 +300,55 @@ func (h *harness) initGitRepoLocal(ctx context.Context) {
 	h.git(ctx, "remote", "add", "origin", h.gitURL())
 }
 
-func (h *harness) writeHelloWorldDeployment() string {
-	helloworldDeploy := "helloworld-deployment.yaml"
-	helloworldDeployTpl := helloworldDeploy + ".tpl"
-	helloworldDeployTplPath := filepath.Join("nohelm", helloworldDeployTpl)
-
-	tpl, err := template.ParseFiles(helloworldDeployTplPath)
+func writeTemplate(destdir, tplpath string, values interface{}) (string, error) {
+	tpl, err := template.ParseFiles(tplpath)
 	if err != nil {
-		h.t.Fatalf("Unable to parse template %q: %v", helloworldDeployTplPath, err)
+		return "", fmt.Errorf("Unable to parse template %q: %v", tplpath, err)
 	}
 
-	foutpath := filepath.Join(h.repodir, helloworldDeploy)
+	base := filepath.Base(tplpath)
+	foutpath := filepath.Join(destdir, strings.TrimSuffix(base, ".tpl"))
 	fout, err := os.Create(foutpath)
 	if err != nil {
-		h.t.Fatalf("Unable to write deployment %q: %v", foutpath, err)
+		return "", fmt.Errorf("Unable to write template output %q: %v", foutpath, err)
 	}
 
-	tpl.ExecuteTemplate(fout, helloworldDeployTpl, struct{ ImageTag string }{helloworldImageTag})
-
+	err = tpl.ExecuteTemplate(fout, base, values)
+	if err != nil {
+		return "", fmt.Errorf("Unable to execute template %q: %v", tplpath, err)
+	}
 	err = fout.Close()
 	if err != nil {
-		h.t.Fatalf("Unable to close deployment %q: %v", foutpath, err)
+		return "", fmt.Errorf("Unable to close deployment %q: %v", foutpath, err)
 	}
-	return helloworldDeploy
+	return foutpath, nil
 }
 
-func (h *harness) writeFluxDeployment() string {
-	fluxDeploy := "flux-deploy-all.yaml"
-	fluxDeployTpl := fluxDeploy + ".tpl"
-	fluxDeployTplPath := filepath.Join("nohelm", fluxDeployTpl)
+func writeHelloWorldDeployment(destdir string) (string, error) {
+	return writeTemplate(destdir, "nohelm/helloworld-deployment.yaml.tpl",
+		struct{ ImageTag string }{helloworldImageTag})
+}
 
-	tpl, err := template.ParseFiles(fluxDeployTplPath)
-	if err != nil {
-		h.t.Fatalf("Unable to parse template %q: %v", fluxDeployTplPath, err)
-	}
+func writeFluxDeployment(destdir string, giturl string) (string, error) {
+	return writeTemplate(destdir, "nohelm/flux-deploy-all.yaml.tpl",
+		struct {
+			FluxImage string
+			FluxPort  string
+			GitURL    string
+		}{fluxImage, fluxPort, giturl})
+}
 
-	foutpath := filepath.Join(h.workdir, fluxDeploy)
-	fout, err := os.Create(foutpath)
-	if err != nil {
-		h.t.Fatalf("Unable to write deployment %q: %v", foutpath, err)
-	}
-
-	tpl.ExecuteTemplate(fout, fluxDeployTpl, struct {
-		FluxImage string
-		FluxPort  string
-		GitURL    string
-	}{fluxImage, fluxPort, h.gitURL()})
-
-	err = fout.Close()
-	if err != nil {
-		h.t.Fatalf("Unable to close deployment %q: %v", foutpath, err)
-	}
-	return foutpath
+func writeNamespace(destdir string) (string, error) {
+	return writeTemplate(destdir, "namespace.yaml.tpl",
+		struct{ Namespace string }{fluxNamespace})
 }
 
 func (h *harness) deployViaGit(ctx context.Context) {
-	h.gitOrDie(ctx, "add", h.writeHelloWorldDeployment())
+	out, err := writeHelloWorldDeployment(h.repodir)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.gitOrDie(ctx, "add", out)
 	h.gitOrDie(ctx, "commit", "-m", "Deploy helloworld")
 	h.gitOrDie(ctx, "push", "-u", "origin", "master")
 }
@@ -397,7 +404,11 @@ func (h *harness) automate() {
 
 func (h *harness) applyFlux() {
 	h.kubectlIgnoreErrs(context.TODO(), h.t, fluxNamespace, "delete", "deploy", "flux", "memcached")
-	h.kubectlOrDie(context.TODO(), h.t, fluxNamespace, "apply", "-f", h.writeFluxDeployment())
+	out, err := writeFluxDeployment(h.repodir, h.gitURL())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.kubectlOrDie(context.TODO(), h.t, fluxNamespace, "apply", "-f", out)
 }
 
 func (h *harness) verifySyncAndSvcs(t *testing.T, targetRevSource, expectedHelloworldTag string, expectedSidecarTag string) {

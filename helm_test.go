@@ -6,19 +6,15 @@ import (
 )
 
 func (h *harness) installFluxChart() {
-	// reponame := "sp"
-	relname := "cd"
-
 	h.helmOrDie(context.Background(), "init", "--client-only")
-	// h.helmOrDie(context.Background(), "repo", "add", reponame, "https://stefanprodan.github.io/k8s-podinfo")
-	h.helmIgnoreErr(context.TODO(), "delete", "--purge", relname)
+	h.helmIgnoreErr(context.TODO(), "delete", "--purge", helmFluxRelease)
 	h.helmOrDie(context.TODO(), "install",
 		"--set", "helmOperator.create=true",
 		"--set", "git.url="+h.gitURL(),
 		"--set", "git.chartsPath=charts",
 		"--set", "image.tag=latest",
 		"--set", "helmOperator.tag=latest",
-		"--name", relname,
+		"--name", helmFluxRelease,
 		"--namespace", helmFluxNamespace,
 		"helm/charts/weave-flux")
 }
