@@ -37,15 +37,13 @@ const (
 	fluxOperatorImage       = "quay.io/weaveworks/helm-operator:latest"
 	fluxPort                = "30080"
 	gitRepoPathOnNode       = "/home/docker/flux.git"
-	fluxNamespace           = "kube-system"
+	fluxNamespace           = "flux"
 	helloworldImageTag      = "master-a000001"
 	sidecarImageTag         = "master-a000001"
 	appNamespace            = "default"
 	fluxSyncTag             = "flux-sync"
-
-	helmFluxNamespace = "flux"
-	helmVersion       = "v2.9.0"
-	helmFluxRelease   = "cd"
+	helmVersion             = "v2.9.0"
+	helmFluxRelease         = "cd"
 )
 
 type (
@@ -254,8 +252,11 @@ func (s *setup) run() {
 	// out := strOrDie(writeNamespace(s.workdir))
 	// s.kubectlOrDie(context.TODO(), nil, "kube-system", "apply", "-f", out)
 
+	// s.kubectlIgnoreErrs(context.TODO(), nil, fluxNamespace, "delete", "deploy,svc", "flux")
+	// s.kubectlIgnoreErrs(context.TODO(), nil, appNamespace, "delete", "deploy,svc", "--all")
+
 	s.ssh(fluxNamespace)
-	s.ssh(helmFluxNamespace)
+	// s.ssh(helmFluxNamespace)
 }
 
 func (h *harness) initGitRepoOnNode(ctx context.Context) {
@@ -403,12 +404,14 @@ func (h *harness) automate() {
 }
 
 func (h *harness) applyFlux() {
-	h.kubectlIgnoreErrs(context.TODO(), h.t, fluxNamespace, "delete", "deploy", "flux", "memcached")
-	out, err := writeFluxDeployment(h.repodir, h.gitURL())
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	h.kubectlOrDie(context.TODO(), h.t, fluxNamespace, "apply", "-f", out)
+	h.installFluxChart()
+
+	// h.kubectlIgnoreErrs(context.TODO(), h.t, fluxNamespace, "delete", "deploy", "flux", "memcached")
+	// out, err := writeFluxDeployment(h.repodir, h.gitURL())
+	// if err != nil {
+	// 	h.t.Fatal(err)
+	// }
+	// h.kubectlOrDie(context.TODO(), h.t, fluxNamespace, "apply", "-f", out)
 }
 
 func (h *harness) verifySyncAndSvcs(t *testing.T, targetRevSource, expectedHelloworldTag string, expectedSidecarTag string) {

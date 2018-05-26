@@ -15,10 +15,11 @@ func (h *harness) installFluxChart() {
 		"--set", "image.tag=latest",
 		"--set", "helmOperator.tag=latest",
 		"--name", helmFluxRelease,
-		"--namespace", helmFluxNamespace,
+		"--namespace", fluxNamespace,
 		"helm/charts/weave-flux")
 }
 
+// TODO test chart with README template
 func (h *harness) deployChartViaGit(ctx context.Context) {
 	execNoErr(ctx, h.t, "cp", "-rT", "helm/repo", h.repodir)
 	h.gitOrDie(ctx, "add", h.repodir)
@@ -31,5 +32,7 @@ func TestChart(t *testing.T) {
 	h.installFluxChart()
 	h.initGitRepoLocal(context.TODO())
 	h.deployChartViaGit(context.Background())
-	h.verifySyncAndSvcs(t, "HEAD", helloworldImageTag, sidecarImageTag)
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	h.waitForSync(ctx, "HEAD")
+	cancel()
 }
