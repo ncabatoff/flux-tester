@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os/exec"
@@ -113,4 +114,32 @@ func services(ctx context.Context, t *testing.T, namespace string, id string) ma
 	}
 
 	return result
+}
+
+func httpget(ctx context.Context, url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	return string(body), err
+}
+
+func httpgetNoErr(ctx context.Context, url string) (string, error) {
+	var err error
+	var body string
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			body, err = httpget(ctx, url)
+			if err == nil {
+				return body, nil
+			}
+		case <-ctx.Done():
+			return "", fmt.Errorf("timed out, last error: %v", err)
+		}
+	}
 }

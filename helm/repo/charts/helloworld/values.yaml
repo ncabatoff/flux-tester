@@ -7,4 +7,10 @@ replicaCount: 2
 image:
   helloworldtag: "master-a000001"
   sidecartag: "master-a000001"
+  
+service:
+  helloworld:
+    port: 30030
+  sidecar:
+    port: 30031
 
