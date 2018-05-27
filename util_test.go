@@ -65,8 +65,24 @@ func execNoErr(ctx context.Context, t *testing.T, command string, args ...string
 	return envExecNoErr(ctx, t, nil, command, args...)
 }
 
-func (h *harness) servicesAPICall(ctx context.Context, namespace string) ([]v6.ControllerStatus, error) {
-	api := client.New(http.DefaultClient, transport.NewAPIRouter(), h.fluxURL(), "")
+func until(ctx context.Context, f func(context.Context) error) error {
+	var err error
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			err = f(ctx)
+			if err == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return fmt.Errorf("timed out, last error: %v", err)
+		}
+	}
+}
+
+func fluxServicesAPICall(ctx context.Context, fluxURL string, namespace string) ([]v6.ControllerStatus, error) {
+	api := client.New(http.DefaultClient, transport.NewAPIRouter(), fluxURL, "")
 	var controllers []v6.ControllerStatus
 	return controllers, until(ctx, func(ictx context.Context) error {
 		var err error
@@ -75,9 +91,9 @@ func (h *harness) servicesAPICall(ctx context.Context, namespace string) ([]v6.C
 	})
 }
 
-// services asks flux for the services it's managing, return a map from container name to id.
-func (h *harness) services(ctx context.Context, t *testing.T, namespace string, id string) map[string]image.Ref {
-	controllers, err := h.servicesAPICall(ctx, namespace)
+// fluxServices asks flux for the services it's managing, return a map from container name to id.
+func fluxServices(ctx context.Context, fluxURL string, t *testing.T, namespace string, id string) map[string]image.Ref {
+	controllers, err := fluxServicesAPICall(ctx, fluxURL, namespace)
 	if err != nil {
 		t.Errorf("failed to fetch controllers from flux agent: %v", err)
 	}
@@ -94,7 +110,7 @@ func (h *harness) services(ctx context.Context, t *testing.T, namespace string, 
 	return result
 }
 
-func httpget(ctx context.Context, url string) (string, error) {
+func httpGet(ctx context.Context, url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -105,27 +121,15 @@ func httpget(ctx context.Context, url string) (string, error) {
 	return string(body), err
 }
 
-func httpgetNoErr(ctx context.Context, url string) (string, error) {
-	var body string
-	return body, until(ctx, func(ictx context.Context) error {
-		var err error
-		body, err = httpget(ictx, url)
-		return err
-	})
-}
-
-func until(ctx context.Context, f func(context.Context) error) error {
-	var err error
-	ticker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			err = f(ctx)
-			if err == nil {
-				return nil
-			}
-		case <-ctx.Done():
-			return fmt.Errorf("timed out, last error: %v", err)
+func httpGetReturns(host string, port int, expected string) error {
+	url := fmt.Sprintf("http://%s:%d", host, port)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return until(ctx, func(ictx context.Context) error {
+		got, err := httpGet(ictx, url)
+		if err != nil || got != expected {
+			return fmt.Errorf("service check on %d failed, got %q, error: %v", port, got, err)
 		}
-	}
+		return nil
+	})
 }

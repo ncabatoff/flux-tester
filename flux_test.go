@@ -5,10 +5,7 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,35 +28,15 @@ const (
 	// a change made to a helm release.
 	releaseTimeout          = 10 * time.Second
 	automationUpdateTimeout = 180 * time.Second
-	fluxImage               = "quay.io/weaveworks/flux:latest"
-	fluxOperatorImage       = "quay.io/weaveworks/helm-operator:latest"
 	fluxPort                = "30080"
 	gitRepoPathOnNode       = "/home/docker/flux.git"
-	fluxNamespace           = "flux"
 	helloworldImageTag      = "master-a000001"
 	sidecarImageTag         = "master-a000001"
 	appNamespace            = "default"
 	fluxSyncTag             = "flux-sync"
-	helmFluxRelease         = "cd"
 )
 
 type (
-	// setup is generally concerned with things that apply globally, and don't
-	// depend on harness state.
-	workdir struct {
-		root          string
-		sshKnownHosts string
-	}
-
-	setup struct {
-		workdir
-		profile   string
-		clusterIP string
-		clusterAPI
-		kubectlAPI
-		helmAPI
-	}
-
 	// harness holds state that may be test-specific.
 	harness struct {
 		workdir
@@ -75,20 +52,7 @@ type (
 var (
 	helloworldImageName = image.Name{Domain: "quay.io", Image: "weaveworks/helloworld"}
 	sidecarImageName    = image.Name{Domain: "quay.io", Image: "weaveworks/sidecar"}
-	global              setup
 )
-
-func newsetup(profile string) *setup {
-	dir, err := ioutil.TempDir("", "fluxtest")
-	if err != nil {
-		log.Fatalf("Error creating tempdir: %v", err)
-	}
-
-	return &setup{
-		workdir: workdir{root: dir},
-		profile: profile,
-	}
-}
 
 func newharness(t *testing.T) *harness {
 	testdir := filepath.Join(global.workdir.root, t.Name())
@@ -114,37 +78,6 @@ func newharness(t *testing.T) *harness {
 	return h
 }
 
-func (s *setup) clean() error {
-	return os.RemoveAll(s.workdir.root)
-}
-
-func (w workdir) knownHostsPath() string {
-	return filepath.Join(w.root, "ssh-known-hosts")
-}
-
-func (s *setup) must(err error) {
-	if err != nil {
-		log.Fatalf("%s", err)
-	}
-}
-
-func (s *setup) ssh(namespace string) {
-	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", s.clusterIP)
-	ioutil.WriteFile(s.knownHostsPath(), []byte(knownHostsContent), 0600)
-
-	s.kubectlAPI.create("", "namespace", namespace)
-
-	secretName := "flux-git-deploy"
-	s.kubectlAPI.delete(namespace, "secret", secretName)
-	s.must(s.kubectlAPI.create(namespace, "secret", "generic", secretName, "--from-file",
-		fmt.Sprintf("identity=%s", s.sshKeyPath())))
-
-	configMapName := "ssh-known-hosts"
-	s.kubectlAPI.delete(namespace, "configmap", configMapName)
-	s.must(s.kubectlAPI.create(namespace, "configmap", configMapName, "--from-file",
-		fmt.Sprintf("known_hosts=%s", s.knownHostsPath())))
-}
-
 func (h *harness) initGitRepoOnNode(ctx context.Context) {
 	h.clusterAPI.sshToNode(fmt.Sprintf(
 		`set -e; dir="%s"; if [ -d "$dir" ]; then rm -rf "$dir"; fi; git init --bare "$dir"`,
@@ -158,6 +91,12 @@ func (h *harness) gitURL() string {
 func (h *harness) fluxURL() string {
 	u := &url.URL{Scheme: "http", Host: h.clusterIP + ":" + fluxPort, Path: "/api/flux"}
 	return u.String()
+}
+
+func (h *harness) must(err error) {
+	if err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func writeTemplate(destdir, tplpath string, values interface{}) (string, error) {
@@ -189,19 +128,14 @@ func writeHelloWorldDeployment(destdir string) (string, error) {
 		struct{ ImageTag string }{helloworldImageTag})
 }
 
-func writeFluxDeployment(destdir string, giturl string) (string, error) {
-	return writeTemplate(destdir, "nohelm/flux-deploy-all.yaml.tpl",
-		struct {
-			FluxImage string
-			FluxPort  string
-			GitURL    string
-		}{fluxImage, fluxPort, giturl})
-}
-
-func writeNamespace(destdir string) (string, error) {
-	return writeTemplate(destdir, "namespace.yaml.tpl",
-		struct{ Namespace string }{fluxNamespace})
-}
+// func writeFluxDeployment(destdir string, giturl string) (string, error) {
+// 	return writeTemplate(destdir, "nohelm/flux-deploy-all.yaml.tpl",
+// 		struct {
+// 			FluxImage string
+// 			FluxPort  string
+// 			GitURL    string
+// 		}{fluxImage, fluxPort, giturl})
+// }
 
 func (h *harness) deployViaGit(ctx context.Context) {
 	_, err := writeHelloWorldDeployment(h.repodir)
@@ -211,48 +145,38 @@ func (h *harness) deployViaGit(ctx context.Context) {
 	h.mustAddCommitPush()
 }
 
-func (h *harness) waitForSync(ctx context.Context, targetRevSource string) bool {
+func (h *harness) waitForSync(ctx context.Context, targetRevSource string) {
 	headRev, err := h.revlist("-n", "1", targetRevSource)
 	if err != nil {
 		h.t.Fatalf("Unable to get head rev: %v", err)
 	}
-	t := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-t.C:
-			h.mustFetch()
-			syncRev, _ := h.revlist("-n", "1", fluxSyncTag)
-			if syncRev == headRev {
-				return true
-			}
-		case <-ctx.Done():
-			h.t.Fatalf("Failed to sync to revision %s", headRev)
+	h.must(until(ctx, func(ictx context.Context) error {
+		h.mustFetch()
+		syncRev, _ := h.revlist("-n", "1", fluxSyncTag)
+		if syncRev != headRev {
+			return fmt.Errorf("sync tag %q points at %q instead of HEAD %s",
+				fluxSyncTag, syncRev, headRev)
 		}
-
-	}
+		return nil
+	}))
 }
 
-func (h *harness) waitForUpstreamCommits(ctx context.Context, mincount int) bool {
-	ticker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			h.mustFetch()
-			strcount, _ := h.revlist("--count", "HEAD.."+fluxSyncTag)
-			if strcount != "" {
-				count, err := strconv.Atoi(strings.TrimSpace(strcount))
-				if err != nil {
-					log.Fatalf("git rev-list --count returned a non-numeric output %q: %v", strcount, err)
-				}
-				if count >= mincount {
-					return true
-				}
-			}
-		case <-ctx.Done():
-			h.t.Fatalf("Failed to find at least %d commits", mincount)
+func (h *harness) waitForUpstreamCommits(ctx context.Context, mincount int) {
+	h.must(until(ctx, func(ictx context.Context) error {
+		h.mustFetch()
+		strcount, _ := h.revlist("--count", "HEAD.."+fluxSyncTag)
+		if strcount == "" {
+			return fmt.Errorf("no output returned by git revlist")
 		}
-
-	}
+		count, err := strconv.Atoi(strings.TrimSpace(strcount))
+		if err != nil {
+			h.t.Fatalf("git rev-list --count returned a non-numeric output %q: %v", strcount, err)
+		}
+		if count < mincount {
+			return fmt.Errorf("Found %d commits instead of required minimum %d", count, mincount)
+		}
+		return nil
+	}))
 }
 
 func (h *harness) automate() {
@@ -291,7 +215,7 @@ func (h *harness) verifySyncAndSvcs(t *testing.T, targetRevSource, expectedHello
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 	h.waitForSync(ctx, targetRevSource)
 	for got == nil || diff != "" {
-		got = h.services(ctx, t, appNamespace, appNamespace+":deployment/helloworld")
+		got = fluxServices(ctx, h.fluxURL(), t, appNamespace, appNamespace+":deployment/helloworld")
 		diff = cmp.Diff(got, expected)
 	}
 	cancel()
@@ -299,64 +223,6 @@ func (h *harness) verifySyncAndSvcs(t *testing.T, targetRevSource, expectedHello
 	if diff != "" {
 		t.Errorf("Expected %+v, got %+v, diff: %s", expected, got, diff)
 	}
-}
-
-func setupPath() {
-	cwd, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("cannot get working directory: %v", err)
-	}
-	envpath := os.Getenv("PATH")
-	if envpath == "" {
-		envpath = filepath.Join(cwd, "bin")
-	} else {
-		envpath = filepath.Join(cwd, "bin") + ":" + envpath
-	}
-	os.Setenv("PATH", envpath)
-}
-
-func TestMain(m *testing.M) {
-	var (
-		flagKeepWorkdir = flag.Bool("keep-workdir", false,
-			"don't delete workdir on exit")
-		flagStartMinikube = flag.Bool("start-minikube", false,
-			"start minikube (or delete and start if it already exists)")
-		flagMinikubeProfile = flag.String("minikube-profile", "minikube",
-			"minikube profile to use, don't change until we have a fix for https://github.com/kubernetes/minikube/issues/2717")
-	)
-	flag.Parse()
-	log.Printf("Testing with keep-workdir=%v, start-minikube=%v, minikube-profile=%v",
-		*flagKeepWorkdir, *flagStartMinikube, *flagMinikubeProfile)
-
-	setupPath()
-
-	global = *newsetup(*flagMinikubeProfile)
-	if !*flagKeepWorkdir {
-		defer global.clean()
-	}
-
-	minikube := mustNewMinikube(stdLogger{}, *flagMinikubeProfile)
-	if *flagStartMinikube {
-		minikube.delete()
-		minikube.start()
-	}
-
-	global.clusterAPI = minikube
-	global.clusterIP = minikube.nodeIP()
-	global.kubectlAPI = mustNewKubectl(stdLogger{}, *flagMinikubeProfile)
-	global.helmAPI = mustNewHelm(stdLogger{}, *flagMinikubeProfile,
-		global.workdir.root, global.kubectlAPI)
-
-	global.loadDockerImage(fluxImage)
-	global.loadDockerImage(fluxOperatorImage)
-
-	global.ssh(fluxNamespace)
-
-	// Make sure that if helm flux is sitting around due to a previous failed
-	// test, it won't interfere with upcoming tests.
-	global.helmAPI.delete(helmFluxRelease, true)
-
-	os.Exit(m.Run())
 }
 
 // TestSync makes sure that the sync tag has been updated to reflect our repo's HEAD,

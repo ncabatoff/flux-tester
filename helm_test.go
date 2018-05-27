@@ -48,12 +48,6 @@ func (h *harness) initHelmTest(pollinterval time.Duration) {
 	h.pushNewHelmFluxRepo(context.Background())
 }
 
-func (h *harness) must(err error) {
-	if err != nil {
-		h.t.Fatal(err)
-	}
-}
-
 func (h *harness) lastHelmRelease(releaseName string) helmHistory {
 	// There may be one or two history entries, depending on timing.  It
 	// seems there's an unnecessary upgrade happening, but only once.
@@ -109,25 +103,6 @@ func (h *harness) assertHelmReleaseHasValue(timeout time.Duration, releaseName s
 	}))
 }
 
-func (h *harness) serviceReturns(port int, expected string) error {
-	url := fmt.Sprintf("http://%s:%d", h.clusterIP, port)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return until(ctx, func(ictx context.Context) error {
-		got, err := httpget(ictx, url)
-		if err != nil || got != expected {
-			return fmt.Errorf("service check on %d failed, got %q, error: %v", port, got, err)
-		}
-		return nil
-	})
-}
-
-func (h *harness) assertServiceReturns(port int, expected string) {
-	if err := h.serviceReturns(port, expected); err != nil {
-		h.t.Error(err)
-	}
-}
-
 func (h *harness) updateGitYaml(relpath string, yamlpath string, value string) {
 	execNoErr(context.Background(), h.t, yq, "w", "-i",
 		filepath.Join(h.repodir, relpath), yamlpath, value)
@@ -139,8 +114,8 @@ func TestChart(t *testing.T) {
 
 	h.assertHelmReleaseDeployed(releaseName1, 1)
 
-	h.assertServiceReturns(defaultHelloworldPort, "Ahoy\n")
-	h.assertServiceReturns(defaultSidecarPort, "I am a sidecar\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
+	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 }
 
 func TestChartUpdateViaGit(t *testing.T) {
@@ -148,8 +123,8 @@ func TestChartUpdateViaGit(t *testing.T) {
 	h.initHelmTest(defaultPollInterval)
 
 	initialRevision := h.assertHelmReleaseDeployed(releaseName1, 1)
-	h.assertServiceReturns(defaultHelloworldPort, "Ahoy\n")
-	h.assertServiceReturns(defaultSidecarPort, "I am a sidecar\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
+	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 
 	// obviously this should work if the above works, it's just to
 	// contrast with the Dial invocation below
@@ -164,8 +139,8 @@ func TestChartUpdateViaGit(t *testing.T) {
 	h.gitAddCommitPushSync()
 
 	h.assertHelmReleaseDeployed(releaseName1, initialRevision+1)
-	h.assertServiceReturns(defaultHelloworldPort, newMessage+"\n")
-	h.assertServiceReturns(newSidecarPort, "I am a sidecar\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, newMessage+"\n"))
+	h.must(httpGetReturns(h.clusterIP, newSidecarPort, "I am a sidecar\n"))
 
 	_, err = net.Dial("tcp", fmt.Sprintf("%s:%d", h.clusterIP, defaultSidecarPort))
 	if err == nil {
@@ -179,8 +154,8 @@ func TestChartUpdateViaHelm(t *testing.T) {
 	h.initHelmTest(pollInterval)
 
 	initialRevision := h.assertHelmReleaseDeployed(releaseName1, 1)
-	h.assertServiceReturns(defaultHelloworldPort, "Ahoy\n")
-	h.assertServiceReturns(defaultSidecarPort, "I am a sidecar\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
+	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 
 	key, val := "hellomessage", "greetings"
 	h.helmAPI.mustUpgrade(releaseName1,
@@ -188,11 +163,11 @@ func TestChartUpdateViaHelm(t *testing.T) {
 		true, fmt.Sprintf("%s=%s", key, val))
 
 	h.assertHelmReleaseHasValue(releaseTimeout, releaseName1, initialRevision+1, key, val)
-	h.assertServiceReturns(defaultHelloworldPort, val+"\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, val+"\n"))
 
 	// TODO specify minrevision more precisely
 	h.assertHelmReleaseHasValue(releaseTimeout+pollInterval, releaseName1, initialRevision+1, key, "null")
-	h.assertServiceReturns(defaultHelloworldPort, "Ahoy\n")
+	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
 }
 
 // TODO tests:

@@ -15,9 +15,7 @@ The main differences with test-flux:
 - By default doesn't start/delete minikube, assumes one is already running
 - Requires specific minikube and k8s versions
 - Deploys flux via a helm chart
-- Adds support for testing flux with the helm-operator.
-  Relies on [#1099](https://github.com/weaveworks/flux/pull/1099)
-  and [#1100](https://github.com/weaveworks/flux/pull/1100).
+- Adds support for testing flux's helm-operator.
 
 ## Background
 
