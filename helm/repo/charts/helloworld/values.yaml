@@ -14,3 +14,5 @@ service:
   sidecar:
     port: 30031
 
+hellomessage: Ahoy
+

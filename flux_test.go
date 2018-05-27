@@ -24,14 +24,17 @@ import (
 )
 
 const (
-	minikubeProfile         = "minikube"
-	minikubeVersion         = "v0.27.0"
-	minikubeCommand         = "minikube"
-	k8sVersion              = "v1.9.6" // need post-1.9.4 due to https://github.com/kubernetes/kubernetes/issues/61076
-	k8sSetupTimeout         = 600 * time.Second
-	imageSetupTimeout       = 30 * time.Second
-	gitSetupTimeout         = 10 * time.Second
-	syncTimeout             = 120 * time.Second
+	minikubeProfile   = "minikube"
+	minikubeVersion   = "v0.27.0"
+	minikubeCommand   = "minikube"
+	k8sVersion        = "v1.9.6" // need post-1.9.4 due to https://github.com/kubernetes/kubernetes/issues/61076
+	k8sSetupTimeout   = 600 * time.Second
+	imageSetupTimeout = 30 * time.Second
+	gitSetupTimeout   = 10 * time.Second
+	syncTimeout       = 20 * time.Second
+	// releaseTimeout is how long we allow between seeing sync done and seeing
+	// a change made to a helm release.
+	releaseTimeout          = 10 * time.Second
 	automationUpdateTimeout = 180 * time.Second
 	fluxImage               = "quay.io/weaveworks/flux:latest"
 	fluxOperatorImage       = "quay.io/weaveworks/helm-operator:latest"
@@ -179,6 +182,7 @@ func (s *setup) svcurl() string {
 func (s *setup) helmSubCmd(subcmd string, args ...string) []string {
 	return append([]string{"helm",
 		"--kube-context", s.profile,
+		"--tiller-connection-timeout", "5",
 		"--home", filepath.Join(s.workdir, "helm"),
 		subcmd}, args...)
 }
@@ -404,7 +408,7 @@ func (h *harness) automate() {
 }
 
 func (h *harness) applyFlux() {
-	h.installFluxChart()
+	h.installFluxChart(defaultPollInterval)
 
 	// h.kubectlIgnoreErrs(context.TODO(), h.t, fluxNamespace, "delete", "deploy", "flux", "memcached")
 	// out, err := writeFluxDeployment(h.repodir, h.gitURL())

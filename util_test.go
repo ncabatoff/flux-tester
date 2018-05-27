@@ -7,11 +7,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os/exec"
 	"os/user"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,8 +58,13 @@ func ignoreErr(s string, err error) string {
 }
 
 func envExec(ctx context.Context, t *testing.T, env []string, command string, args ...string) (string, error) {
+	return envExecStdin(ctx, t, env, strings.NewReader(""), command, args...)
+}
+
+func envExecStdin(ctx context.Context, t *testing.T, env []string, stdin io.Reader, command string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = env
+	cmd.Stdin = stdin
 	if t != nil {
 		t.Logf("running %v", cmd.Args)
 	} else {
@@ -81,20 +88,12 @@ func execNoErr(ctx context.Context, t *testing.T, command string, args ...string
 
 func servicesAPICall(ctx context.Context, namespace string) ([]v6.ControllerStatus, error) {
 	api := client.New(http.DefaultClient, transport.NewAPIRouter(), global.svcurl(), "")
-	var err error
 	var controllers []v6.ControllerStatus
-	ticker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			controllers, err = api.ListServices(ctx, namespace)
-			if err == nil {
-				return controllers, nil
-			}
-		case <-ctx.Done():
-			return nil, fmt.Errorf("timed out, last error: %v", err)
-		}
-	}
+	return controllers, until(ctx, func(ictx context.Context) error {
+		var err error
+		controllers, err = api.ListServices(ictx, namespace)
+		return err
+	})
 }
 
 // services asks flux for the services it's managing, return a map from container name to id.
@@ -128,18 +127,26 @@ func httpget(ctx context.Context, url string) (string, error) {
 }
 
 func httpgetNoErr(ctx context.Context, url string) (string, error) {
-	var err error
 	var body string
+	return body, until(ctx, func(ictx context.Context) error {
+		var err error
+		body, err = httpget(ictx, url)
+		return err
+	})
+}
+
+func until(ctx context.Context, f func(context.Context) error) error {
+	var err error
 	ticker := time.NewTicker(time.Second)
 	for {
 		select {
 		case <-ticker.C:
-			body, err = httpget(ctx, url)
+			err = f(ctx)
 			if err == nil {
-				return body, nil
+				return nil
 			}
 		case <-ctx.Done():
-			return "", fmt.Errorf("timed out, last error: %v", err)
+			return fmt.Errorf("timed out, last error: %v", err)
 		}
 	}
 }

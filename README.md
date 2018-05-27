@@ -14,18 +14,8 @@ The main differences with test-flux:
 - Not broken (see [#919](https://github.com/weaveworks/flux/issues/919))
 - By default doesn't start/delete minikube, assumes one is already running
 - Requires specific minikube and k8s versions
-
-Minor differences:
-- Incorporates a proposed fix for brokenness 
-  ([#921](https://github.com/weaveworks/flux/pull/921)) but with a small
-  tweak: the second wait_for_sync need to look at a different revset than
-  what HEAD points to, since a git fetch doesn't seem to be update that.
-
-New functionality:
-- Adds preliminary support for testing flux with the helm-operator.
-  Currently TestChart gets as far as deploying a chart via git which
-  flux/helm-operator turns into a helm release.  The flux agent doesn't
-  report this as a controller though, so the test never succeeds.
+- Deploys flux via a helm chart
+- Adds support for testing flux with the helm-operator.
   Relies on [#1099](https://github.com/weaveworks/flux/pull/1099)
   and [#1100](https://github.com/weaveworks/flux/pull/1100).
 

@@ -23,7 +23,7 @@ spec:
         - name: helloworld
           image: "quay.io/weaveworks/helloworld:{{ .Values.image.helloworldtag }}"
           args:
-            - -msg=Ahoy
+            - "-msg={{ .Values.hellomessage }}"
           ports:
             - containerPort: 80
         - name: sidecar
