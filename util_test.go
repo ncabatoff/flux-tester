@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
-	"os/user"
 	"strings"
 	"testing"
 	"time"
@@ -22,26 +21,6 @@ import (
 	"github.com/weaveworks/flux/http/client"
 	"github.com/weaveworks/flux/image"
 )
-
-func getuser() user.User {
-	u, err := user.Current()
-	if err != nil {
-		log.Fatalf("can't get current user: %v", err)
-	}
-	return *u
-}
-
-func username() string {
-	return getuser().Username
-}
-
-func homedir() string {
-	u := getuser()
-	if u.HomeDir == "" {
-		log.Fatal("user homedir is empty")
-	}
-	return u.HomeDir
-}
 
 func strOrDie(s string, err error) string {
 	if err != nil {
@@ -86,8 +65,8 @@ func execNoErr(ctx context.Context, t *testing.T, command string, args ...string
 	return envExecNoErr(ctx, t, nil, command, args...)
 }
 
-func servicesAPICall(ctx context.Context, namespace string) ([]v6.ControllerStatus, error) {
-	api := client.New(http.DefaultClient, transport.NewAPIRouter(), global.svcurl(), "")
+func (h *harness) servicesAPICall(ctx context.Context, namespace string) ([]v6.ControllerStatus, error) {
+	api := client.New(http.DefaultClient, transport.NewAPIRouter(), h.fluxURL(), "")
 	var controllers []v6.ControllerStatus
 	return controllers, until(ctx, func(ictx context.Context) error {
 		var err error
@@ -97,8 +76,8 @@ func servicesAPICall(ctx context.Context, namespace string) ([]v6.ControllerStat
 }
 
 // services asks flux for the services it's managing, return a map from container name to id.
-func services(ctx context.Context, t *testing.T, namespace string, id string) map[string]image.Ref {
-	controllers, err := servicesAPICall(ctx, namespace)
+func (h *harness) services(ctx context.Context, t *testing.T, namespace string, id string) map[string]image.Ref {
+	controllers, err := h.servicesAPICall(ctx, namespace)
 	if err != nil {
 		t.Errorf("failed to fetch controllers from flux agent: %v", err)
 	}

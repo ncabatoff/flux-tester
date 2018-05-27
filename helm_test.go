@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -19,38 +18,22 @@ const (
 	yq                    = "bin/yq"
 )
 
-type (
-	helmHistory struct {
-		Chart       string `json:"chart"`
-		Description string `json:"description"`
-		Revision    int    `json:"revision"`
-		Status      string `json:"status"`
-		Updated     string `json:"updated"`
-	}
-)
-
 func (h *harness) installFluxChart(pollinterval time.Duration) {
-	h.helmOrDie(context.Background(), "init", "--client-only")
-	h.helmIgnoreErr(context.TODO(), "delete", "--purge", helmFluxRelease)
+	h.helmAPI.delete(helmFluxRelease, true)
 	// Hack until #1009 is fixed.
-	h.helmIgnoreErr(context.TODO(), "delete", "--purge", releaseName1)
-	h.helmOrDie(context.TODO(), "install",
-		"--set", "helmOperator.create=true",
-		"--set", "git.url="+h.gitURL(),
-		"--set", "git.chartsPath=charts",
-		"--set", "image.tag=latest",
-		"--set", "helmOperator.tag=latest",
-		"--set", "git.pollInterval="+pollinterval.String(),
-		"--name", helmFluxRelease,
-		"--namespace", fluxNamespace,
-		"helm/charts/weave-flux")
+	h.helmAPI.delete(releaseName1, true)
+	h.helmAPI.mustInstall(fluxNamespace, helmFluxRelease, "helm/charts/weave-flux",
+		"helmOperator.create=true",
+		"git.url="+h.gitURL(),
+		"git.chartsPath=charts",
+		"image.tag=latest",
+		"helmOperator.tag=latest",
+		"git.pollInterval="+pollinterval.String())
 }
 
 func (h *harness) gitAddCommitPushSync() {
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
-	h.gitOrDie(ctx, "add", h.repodir)
-	h.gitOrDie(ctx, "commit", "-m", "Deploy helloworld")
-	h.gitOrDie(ctx, "push", "-u", "origin", "master")
+	h.mustAddCommitPush()
 	h.waitForSync(ctx, "HEAD")
 	cancel()
 }
@@ -61,13 +44,11 @@ func (h *harness) pushNewHelmFluxRepo(ctx context.Context) {
 }
 
 func (h *harness) initHelmTest(pollinterval time.Duration) {
-	h.setupGitRemote()
 	h.installFluxChart(pollinterval)
-	h.initGitRepoLocal(context.TODO())
 	h.pushNewHelmFluxRepo(context.Background())
 }
 
-func (h *harness) exitif(err error) {
+func (h *harness) must(err error) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -76,11 +57,10 @@ func (h *harness) exitif(err error) {
 func (h *harness) lastHelmRelease(releaseName string) helmHistory {
 	// There may be one or two history entries, depending on timing.  It
 	// seems there's an unnecessary upgrade happening, but only once.
-	histstr := h.helmOrDie(context.Background(), "history", releaseName1, "-ojson")
-	var hist []helmHistory
-	h.exitif(json.Unmarshal([]byte(histstr), &hist))
-	if len(hist) == 0 || hist[len(hist)-1].Status == "" {
-		h.t.Errorf("error getting helm history, raw output: %q", histstr)
+	hist := h.helmAPI.mustHistory(releaseName)
+	if len(hist) == 0 {
+		h.t.Errorf("error getting last helm history entry, none found")
+		return helmHistory{}
 	}
 	return hist[len(hist)-1]
 }
@@ -101,8 +81,7 @@ func (h *harness) helmReleaseHasValue(releaseName string, minRevision int, key, 
 		return err
 	}
 
-	valstr := h.helmOrDie(context.Background(), "get", "values", releaseName,
-		"--revision", fmt.Sprintf("%d", hist.Revision))
+	valstr := h.helmAPI.mustGetValues(releaseName, hist.Revision)
 	yqout := strings.TrimSpace(strOrDie(
 		envExecStdin(context.Background(), h.t, nil, strings.NewReader(valstr), yq, "r", "-", key)))
 	if val != yqout {
@@ -115,7 +94,7 @@ func (h *harness) assertHelmReleaseDeployed(releaseName string, minRevision int)
 	var hist helmHistory
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()
-	h.exitif(until(ctx, func(ictx context.Context) error {
+	h.must(until(ctx, func(ictx context.Context) error {
 		hist = h.lastHelmRelease(releaseName)
 		return h.helmReleaseDeployed(hist, releaseName, minRevision)
 	}))
@@ -125,7 +104,7 @@ func (h *harness) assertHelmReleaseDeployed(releaseName string, minRevision int)
 func (h *harness) assertHelmReleaseHasValue(timeout time.Duration, releaseName string, minRevision int, key, val string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	h.exitif(until(ctx, func(ictx context.Context) error {
+	h.must(until(ctx, func(ictx context.Context) error {
 		return h.helmReleaseHasValue(releaseName, minRevision, key, val)
 	}))
 }
@@ -175,7 +154,7 @@ func TestChartUpdateViaGit(t *testing.T) {
 	// obviously this should work if the above works, it's just to
 	// contrast with the Dial invocation below
 	_, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.clusterIP, defaultSidecarPort))
-	h.exitif(err)
+	h.must(err)
 
 	newMessage := "salut"
 	newSidecarPort := defaultSidecarPort + 2
@@ -204,10 +183,9 @@ func TestChartUpdateViaHelm(t *testing.T) {
 	h.assertServiceReturns(defaultSidecarPort, "I am a sidecar\n")
 
 	key, val := "hellomessage", "greetings"
-	h.helmOrDie(context.TODO(), "upgrade", releaseName1,
+	h.helmAPI.mustUpgrade(releaseName1,
 		filepath.Join(h.repodir, "charts", "helloworld"),
-		"--reuse-values",
-		"--set", fmt.Sprintf("%s=%s", key, val))
+		true, fmt.Sprintf("%s=%s", key, val))
 
 	h.assertHelmReleaseHasValue(releaseTimeout, releaseName1, initialRevision+1, key, val)
 	h.assertServiceReturns(defaultHelloworldPort, val+"\n")
