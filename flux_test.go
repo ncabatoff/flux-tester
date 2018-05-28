@@ -1,7 +1,6 @@
-// +build go1.9
+// +build integration_test
 
-// require go1.9 for os/user without cgo
-package main
+package test
 
 import (
 	"context"
@@ -94,6 +93,7 @@ func (h *harness) fluxURL() string {
 }
 
 func (h *harness) must(err error) {
+	h.t.Helper()
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -146,16 +146,16 @@ func (h *harness) deployViaGit(ctx context.Context) {
 }
 
 func (h *harness) waitForSync(ctx context.Context, targetRevSource string) {
-	headRev, err := h.revlist("-n", "1", targetRevSource)
-	if err != nil {
-		h.t.Fatalf("Unable to get head rev: %v", err)
-	}
 	h.must(until(ctx, func(ictx context.Context) error {
 		h.mustFetch()
+		targetRev, err := h.revlist("-n", "1", targetRevSource)
+		if err != nil {
+			h.t.Fatalf("Unable to get latest rev for %s: %v", targetRevSource, err)
+		}
 		syncRev, _ := h.revlist("-n", "1", fluxSyncTag)
-		if syncRev != headRev {
-			return fmt.Errorf("sync tag %q points at %q instead of HEAD %s",
-				fluxSyncTag, syncRev, headRev)
+		if syncRev != targetRev {
+			return fmt.Errorf("sync tag %q points at %q instead of target %s",
+				fluxSyncTag, syncRev, targetRev)
 		}
 		return nil
 	}))

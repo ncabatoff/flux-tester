@@ -1,16 +1,11 @@
-package main
+package test
 
 import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 )
-
-func main() {
-	fmt.Fprint(os.Stderr, "Run go test to execute tests.\n")
-}
 
 type (
 	logger interface {
@@ -71,6 +66,7 @@ func (cr cmdrunner) run(ctx context.Context, args ...string) (string, error) {
 }
 
 func (cr cmdrunner) input(ctx context.Context, in string, args ...string) (string, error) {
+	cr.lg.Helper()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Env = cr.env
 	if cmd.Env != nil {

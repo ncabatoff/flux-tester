@@ -1,8 +1,6 @@
-// require go1.9 for os/user without cgo:
+// +build integration_test
 
-// +build go1.9
-
-package main
+package test
 
 import (
 	"context"

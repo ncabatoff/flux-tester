@@ -1,12 +1,17 @@
-# flux-tester
+# flux integration tests
 Integration tester for [flux](weaveworks/flux).
 
 This is a translation to Go of the bash script 
 [test-flux](https://github.com/weaveworks/flux/blob/master/test/bin/test-flux).
 
-I've forked it into its own repo because I'm planning on making substatial
-changes to how it works, and because I gave up trying to make the existing
-script work as it's currently designed.
+# Usage
+
+```
+cd test && ./download-prereqs.sh && go test -tags integration_test -start-minikube=true
+```
+
+WARNING: This will blow away your existing minikube "minikube" profile.
+See below for why.
 
 ## Current status
 

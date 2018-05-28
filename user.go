@@ -1,4 +1,8 @@
-package main
+// +build go1.9
+
+// require go1.9 for os/user without cgo
+
+package test
 
 import (
 	"log"
