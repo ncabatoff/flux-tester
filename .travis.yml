@@ -25,7 +25,7 @@ install:
   - dep ensure
   - ./bin/minikube config set WantKubectlDownloadMsg false
   - sudo -E ./bin/minikube start --kubernetes-version v1.10.6 --vm-driver=none --bootstrapper=kubeadm
-  - for i in {1..150}; do ./kubectl get po &> /dev/null; if [ $? -ne 1 ]; then break fi; sleep 2; done
+  - for i in {1..150}; do ./bin/kubectl get po &> /dev/null; if [ $? -ne 1 ]; then break fi; sleep 2; done
 
 script:
   - go test -tags integration_test 
