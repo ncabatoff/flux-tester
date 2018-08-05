@@ -92,6 +92,7 @@ func (h *harness) helmReleaseHasValue(releaseName string, minRevision int, key, 
 }
 
 func (h *harness) assertHelmReleaseDeployed(releaseName string, minRevision int) int {
+	h.t.Helper()
 	var hist helmHistory
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()

@@ -49,4 +49,5 @@ spec:
         - --git-url={{ .Values.git.url }}
         - --git-branch={{ .Values.git.branch }}
         - --git-charts-path={{ .Values.git.chartsPath }}
+        - --charts-sync-interval={{ .Values.git.pollInterval }}
 {{- end -}}
