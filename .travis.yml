@@ -23,7 +23,8 @@ before_install:
 
 install:
   - dep ensure
-  - sudo -E ./bin/minikube start --kubernetes-version v1.10.6
+  - ./bin/minikube config set WantKubectlDownloadMsg false
+  - sudo -E ./bin/minikube start --kubernetes-version v1.10.6 --vm-driver=none --bootstrapper=kubeadm
   - for i in {1..150}; do ./kubectl get po &> /dev/null; if [ $? -ne 1 ]; then break fi; sleep 2; done
 
 script:
