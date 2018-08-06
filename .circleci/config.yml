@@ -1,0 +1,29 @@
+version: 2
+jobs:
+  build:
+    machine: true
+    environment:
+      DEP_VERSION: "0.5.0"
+      MINIKUBE_WANTUPDATENOTIFICATION: false
+      MINIKUBE_WANTREPORTERRORPROMPT: false
+      CHANGE_MINIKUBE_NONE_USER: true
+    steps:
+      - checkout
+      - run:
+          command: sudo apt-get -qq update
+      - run:
+          command: sudo apt-get install -y socat
+      - run:
+          command: curl -L -s https://github.com/golang/dep/releases/download/v${DEP_VERSION}/dep-linux-amd64 -o ./dep
+      - run:
+          command: chmod +x ./dep
+      - run:
+          command: mkdir -p $HOME/.kube
+      - run:
+          command: touch $HOME/.kube/config
+      - run:
+          command: ./download-prereqs.sh
+      - run:
+          command: ./dep ensure
+      - run:
+          command: ./bin/minikube config set WantKubectlDownloadMsg false

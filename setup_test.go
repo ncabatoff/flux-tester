@@ -5,7 +5,6 @@ package test
 import (
 	"context"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -25,13 +24,8 @@ const (
 type (
 	// setup is generally concerned with things that apply globally, and don't
 	// depend on harness state.
-	workdir struct {
-		root          string
-		sshKnownHosts string
-	}
-
 	setup struct {
-		workdir
+		testroot  string
 		profile   string
 		clusterIP string
 		clusterAPI
@@ -41,7 +35,9 @@ type (
 )
 
 var (
-	global setup
+	// global is our one global variable, containing the setup common
+	// to all tests.
+	global *setup
 )
 
 func newsetup(profile string) *setup {
@@ -51,17 +47,36 @@ func newsetup(profile string) *setup {
 	}
 
 	return &setup{
-		workdir: workdir{root: dir},
-		profile: profile,
+		testroot: dir,
+		profile:  profile,
 	}
 }
 
 func (s *setup) clean() error {
-	return os.RemoveAll(s.workdir.root)
+	return os.RemoveAll(s.testroot)
 }
 
-func (w workdir) knownHostsPath() string {
-	return filepath.Join(w.root, "ssh-known-hosts")
+func (s *setup) genSshPrivateKey() {
+	// Create ssh dir under workdir and generate ssh key
+	_ = os.Mkdir(s.sshDir(), 0700)
+	// pubkey := privkey + ".pub"
+	execNoErr(context.Background(), nil, "ssh-keygen", "-t", "rsa", "-N", "", "-f", s.sshKeyFilePrivate())
+}
+
+func (s *setup) sshDir() string {
+	return filepath.Join(s.testroot, "ssh")
+}
+
+func (s *setup) sshKeyFilePrivate() string {
+	return filepath.Join(s.sshDir(), "id_rsa")
+}
+
+func (s *setup) sshKeyFilePublic() string {
+	return s.sshKeyFilePrivate() + ".pub"
+}
+
+func (s *setup) knownHostsPath() string {
+	return filepath.Join(s.sshDir(), "ssh-known-hosts")
 }
 
 func (s *setup) must(err error) {
@@ -70,36 +85,7 @@ func (s *setup) must(err error) {
 	}
 }
 
-func (s *setup) ssh(namespace string) {
-	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", "-p", "30022", s.clusterIP)
-	ioutil.WriteFile(s.knownHostsPath(), []byte(knownHostsContent), 0600)
-
-	// TODO namespace creation doesn't belong here, move somewhere more appropriate
-	s.kubectlAPI.create("", "namespace", namespace)
-
-	sshDir := filepath.Join(s.workdir.root, "ssh")
-	_ = os.Mkdir(sshDir, 0700)
-	privkey := filepath.Join(sshDir, "id_rsa")
-	pubkey := privkey + ".pub"
-	execNoErr(context.Background(), nil, "ssh-keygen", "-t", "rsa", "-N", "", "-f", privkey)
-
-	secretName := "flux-git-deploy"
-	s.kubectlAPI.delete(namespace, "secret", secretName)
-	s.must(s.kubectlAPI.create(namespace, "secret", "generic", secretName, "--from-file",
-		fmt.Sprintf("identity=%s", privkey)))
-
-	configMapName := "ssh-known-hosts"
-	s.kubectlAPI.delete(namespace, "configmap", configMapName)
-	s.must(s.kubectlAPI.create(namespace, "configmap", configMapName, "--from-file",
-		fmt.Sprintf("known_hosts=%s", s.knownHostsPath())))
-
-	pubkeyConfigMap := "ssh-public-keys"
-	s.kubectlAPI.delete(namespace, "configmap", pubkeyConfigMap)
-	s.must(s.kubectlAPI.create(namespace, "configmap", pubkeyConfigMap, "--from-file",
-		fmt.Sprintf("me.pub=%s", pubkey)))
-}
-
-func setupPath() {
+func setEnvPath() {
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("cannot get working directory: %v", err)
@@ -128,12 +114,14 @@ func TestMain(m *testing.M) {
 	log.Printf("Testing with keep-workdir=%v, start-minikube=%v, minikube-driver=%v, minikube-profile=%v",
 		*flagKeepWorkdir, *flagStartMinikube, *flagMinikubeDriver, *flagMinikubeProfile)
 
-	setupPath()
+	setEnvPath()
 
-	global = *newsetup(*flagMinikubeProfile)
+	global = newsetup(*flagMinikubeProfile)
 	if !*flagKeepWorkdir {
 		defer global.clean()
 	}
+
+	global.genSshPrivateKey()
 
 	minikube := mustNewMinikube(stdLogger{}, *flagMinikubeProfile)
 	if *flagStartMinikube {
@@ -148,14 +136,14 @@ func TestMain(m *testing.M) {
 	global.clusterIP = minikube.nodeIP()
 	global.kubectlAPI = mustNewKubectl(stdLogger{}, *flagMinikubeProfile)
 	global.helmAPI = mustNewHelm(stdLogger{}, *flagMinikubeProfile,
-		global.workdir.root, global.kubectlAPI)
+		global.testroot, global.kubectlAPI)
 
 	if *flagMinikubeDriver != "none" {
 		global.loadDockerImage(fluxImage)
 		global.loadDockerImage(fluxOperatorImage)
 	}
 
-	global.ssh(fluxNamespace)
+	global.kubectlAPI.create("", "namespace", fluxNamespace)
 
 	// Make sure that if helm flux is sitting around due to a previous failed
 	// test, it won't interfere with upcoming tests.

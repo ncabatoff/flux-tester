@@ -27,4 +27,9 @@ install:
   - for i in {1..150}; do if ./bin/kubectl get po &> /dev/null; then break; fi; sleep 2; done
 
 script:
+  - ./bin/kubectl get pods --all-namespaces
   - go test -v -timeout 20m -tags integration_test -minikube-driver none 
+
+after_script:
+  - ./bin/kubectl get pods --all-namespaces
+  - ./bin/kubectl logs -n flux -l app=weave-flux-helm-operator

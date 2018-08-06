@@ -5,6 +5,8 @@ package test
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,7 +27,7 @@ const (
 	syncTimeout       = 60 * time.Second
 	// releaseTimeout is how long we allow between seeing sync done and seeing
 	// a change made to a helm release.
-	releaseTimeout          = 10 * time.Second
+	releaseTimeout          = 30 * time.Second
 	automationUpdateTimeout = 180 * time.Second
 	fluxPort                = "30080"
 	gitRepoPath             = "/git-server/repos/repo.git"
@@ -38,7 +40,6 @@ const (
 type (
 	// harness holds state that may be test-specific.
 	harness struct {
-		workdir
 		clusterIP string
 		t         *testing.T
 		repodir   string
@@ -54,12 +55,11 @@ var (
 )
 
 func newharness(t *testing.T) *harness {
-	testdir := filepath.Join(global.workdir.root, t.Name())
+	testdir := filepath.Join(global.testroot, t.Name())
 	os.Mkdir(testdir, 0755)
 
 	repodir := filepath.Join(testdir, "repo")
 	h := &harness{
-		workdir:    global.workdir,
 		repodir:    repodir,
 		t:          t,
 		clusterIP:  global.clusterIP,
@@ -67,14 +67,36 @@ func newharness(t *testing.T) *harness {
 		helmAPI:    helm{ht: global.helmAPI.(helm).ht, lg: t},
 	}
 
-	h.installGitChart()
-	// TODO should wait for ssh port to be open
-	time.Sleep(5 * time.Second)
+	// Create configmap for our public key
+	pubkeyConfigMap := "ssh-public-keys"
+	global.kubectlAPI.delete(fluxNamespace, "configmap", pubkeyConfigMap)
+	global.must(global.kubectlAPI.create(fluxNamespace, "configmap", pubkeyConfigMap, "--from-file",
+		fmt.Sprintf("me.pub=%s", global.sshKeyFilePublic())))
 
-	privkey := filepath.Join(h.workdir.root, "ssh/id_rsa")
+	// Create secret for our private key
+	secretName := "flux-git-deploy"
+	global.kubectlAPI.delete(fluxNamespace, "secret", secretName)
+	global.must(global.kubectlAPI.create(fluxNamespace, "secret", "generic", secretName, "--from-file",
+		fmt.Sprintf("identity=%s", global.sshKeyFilePrivate())))
+
+	// Install git service, which depends on the public key
+	h.installGitChart()
+	portOpen(context.Background(), h.clusterIP, 30022)
+
+	// Get the ssh host id
+	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", "-p", "30022", global.clusterIP)
+	ioutil.WriteFile(global.knownHostsPath(), []byte(knownHostsContent), 0600)
+
+	// Record ssh host id in configmap for flux to use
+	configMapName := "ssh-known-hosts"
+	global.kubectlAPI.delete(fluxNamespace, "configmap", configMapName)
+	global.must(global.kubectlAPI.create(fluxNamespace, "configmap", configMapName, "--from-file",
+		fmt.Sprintf("known_hosts=%s", global.knownHostsPath())))
+
+	// Now setup our local clone of the ssh repo.
 	h.gitAPI = mustNewGit(t, repodir,
-		fmt.Sprintf(`ssh -i %s -o UserKnownHostsFile=%s`, privkey, h.knownHostsPath()),
-		h.gitURL())
+		fmt.Sprintf(`ssh -i %s -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%s`,
+			global.sshKeyFilePrivate(), global.knownHostsPath()), h.gitURL())
 
 	return h
 }
@@ -134,6 +156,7 @@ func writeHelloWorldDeployment(destdir string) (string, error) {
 // }
 
 func (h *harness) deployViaGit(ctx context.Context) {
+	log.Printf("deploying hello world via git")
 	_, err := writeHelloWorldDeployment(h.repodir)
 	if err != nil {
 		h.t.Fatal(err)
@@ -209,6 +232,7 @@ func (h *harness) verifySyncAndSvcs(t *testing.T, targetRevSource, expectedHello
 		got  map[string]image.Ref
 	)
 
+	log.Printf("Waiting %v for sync tag to be current", syncTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 	h.waitForSync(ctx, targetRevSource)
 	for got == nil || diff != "" {

@@ -28,8 +28,6 @@ func (h *harness) installFluxChart(pollinterval time.Duration) {
 		"helmOperator.create=true",
 		"git.url="+h.gitURL(),
 		"git.chartsPath=charts",
-		"image.tag=latest",
-		"helmOperator.tag=latest",
 		"git.pollInterval="+pollinterval.String())
 }
 
@@ -130,7 +128,7 @@ func TestChart(t *testing.T) {
 	h.initHelmTest(defaultPollInterval)
 
 	h.assertHelmReleaseDeployed(releaseName1, 1)
-
+	h.must(portOpen(context.Background(), h.clusterIP, defaultHelloworldPort))
 	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
 	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 }
@@ -140,6 +138,7 @@ func TestChartUpdateViaGit(t *testing.T) {
 	h.initHelmTest(defaultPollInterval)
 
 	initialRevision := h.assertHelmReleaseDeployed(releaseName1, 1)
+	h.must(portOpen(context.Background(), h.clusterIP, defaultHelloworldPort))
 	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
 	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 
@@ -171,6 +170,7 @@ func TestChartUpdateViaHelm(t *testing.T) {
 	h.initHelmTest(pollInterval)
 
 	initialRevision := h.assertHelmReleaseDeployed(releaseName1, 1)
+	h.must(portOpen(context.Background(), h.clusterIP, defaultHelloworldPort))
 	h.must(httpGetReturns(h.clusterIP, defaultHelloworldPort, "Ahoy\n"))
 	h.must(httpGetReturns(h.clusterIP, defaultSidecarPort, "I am a sidecar\n"))
 

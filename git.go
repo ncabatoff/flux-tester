@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -40,7 +41,8 @@ func (gt gitTool) addCmd(files ...string) []string {
 }
 
 func (gt gitTool) commitCmd(msg string) []string {
-	return append(gt.common(), []string{"commit", "-m", msg}...)
+	return append(gt.common(), []string{"-c", "user.name=flux-test",
+		"-c", "user.email=flux-test@example.com", "commit", "-m", msg}...)
 }
 
 func (gt gitTool) pushCmd() []string {
@@ -72,7 +74,8 @@ func mustNewGit(lg logger, repodir string, sshcmd string, origin string) git {
 
 	g := git{gt: *gt, lg: lg, gitSSHCommand: sshcmd, gitOriginURL: origin}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	g.cli().must(ctx, gt.cloneCmd(origin)...)
+	out := g.cli().must(ctx, gt.cloneCmd(origin)...)
+	log.Printf("git clone %q with sshcmd=%q result: %s", origin, sshcmd, out)
 	cancel()
 
 	return g

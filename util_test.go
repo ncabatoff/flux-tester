@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -125,13 +126,28 @@ func httpGet(ctx context.Context, url string) (string, error) {
 
 func httpGetReturns(host string, port int, expected string) error {
 	url := fmt.Sprintf("http://%s:%d", host, port)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return until(ctx, func(ictx context.Context) error {
 		got, err := httpGet(ictx, url)
 		if err != nil || got != expected {
 			return fmt.Errorf("service check on %d failed, got %q, error: %v", port, got, err)
 		}
+		return nil
+	})
+}
+
+func portOpen(ctx context.Context, host string, port int) error {
+	dest := fmt.Sprintf("%s:%d", host, port)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return until(ctx, func(ictx context.Context) error {
+		conn, err := net.Dial("tcp", dest)
+		if err != nil {
+			return fmt.Errorf("unable to open port %s: %v", dest, err)
+		}
+		conn.Close()
 		return nil
 	})
 }

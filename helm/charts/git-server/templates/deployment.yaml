@@ -27,6 +27,7 @@ spec:
       initContainers:
         - name: git-init
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ['git', 'init', '--bare', '/git-server/repos/repo.git']
           securityContext:
             runAsUser: 1 # Any non-root user will do. Match to the workload.

@@ -56,3 +56,14 @@ yq_bin=$bindir/yq
 curl -s -L -o $yq_dl -z $yq_dl $yq_base/$yq_version/$yq_relname
 chmod 755 $yq_dl
 ln -f $yq_dl $yq_bin
+
+# fluxctl
+fluxctl_base=https://github.com/weaveworks/flux/releases/download/
+fluxctl_version=1.5.0
+fluxctl_relname=fluxctl_linux_$arch
+fluxctl_dl=$dldir/$fluxctl_relname
+fluxctl_bin=$bindir/fluxctl
+
+curl -s -L -o $fluxctl_dl -z $fluxctl_dl $fluxctl_base/$fluxctl_version/$fluxctl_relname
+chmod 755 $fluxctl_dl
+ln -f $fluxctl_dl $fluxctl_bin
