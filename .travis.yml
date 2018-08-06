@@ -27,4 +27,4 @@ install:
   - for i in {1..150}; do if ./bin/kubectl get po &> /dev/null; then break; fi; sleep 2; done
 
 script:
-  - go test -tags integration_test 
+  - go test -tags integration_test -minikube-driver none

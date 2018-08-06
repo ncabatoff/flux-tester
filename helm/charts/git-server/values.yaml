@@ -1,0 +1,13 @@
+# Default values for git-server.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  repository: jkarlos/git-server-docker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  nodePort: 30022
+
+resources: {}

@@ -33,6 +33,11 @@ func (h *harness) installFluxChart(pollinterval time.Duration) {
 		"git.pollInterval="+pollinterval.String())
 }
 
+func (h *harness) installGitChart() {
+	h.helmAPI.delete(helmGitRelease, true)
+	h.helmAPI.mustInstall(fluxNamespace, helmGitRelease, "helm/charts/git-server")
+}
+
 func (h *harness) gitAddCommitPushSync() {
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 	h.mustAddCommitPush()

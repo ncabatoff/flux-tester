@@ -22,13 +22,13 @@ const (
 	k8sSetupTimeout   = 600 * time.Second
 	imageSetupTimeout = 30 * time.Second
 	gitSetupTimeout   = 10 * time.Second
-	syncTimeout       = 20 * time.Second
+	syncTimeout       = 60 * time.Second
 	// releaseTimeout is how long we allow between seeing sync done and seeing
 	// a change made to a helm release.
 	releaseTimeout          = 10 * time.Second
 	automationUpdateTimeout = 180 * time.Second
 	fluxPort                = "30080"
-	gitRepoPathOnNode       = "/home/docker/flux.git"
+	gitRepoPath             = "/git-server/repos/repo.git"
 	helloworldImageTag      = "master-a000001"
 	sidecarImageTag         = "master-a000001"
 	appNamespace            = "default"
@@ -56,8 +56,8 @@ var (
 func newharness(t *testing.T) *harness {
 	testdir := filepath.Join(global.workdir.root, t.Name())
 	os.Mkdir(testdir, 0755)
-	repodir := filepath.Join(testdir, "repo")
 
+	repodir := filepath.Join(testdir, "repo")
 	h := &harness{
 		workdir:    global.workdir,
 		repodir:    repodir,
@@ -67,24 +67,20 @@ func newharness(t *testing.T) *harness {
 		helmAPI:    helm{ht: global.helmAPI.(helm).ht, lg: t},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), gitSetupTimeout)
-	h.initGitRepoOnNode(ctx)
-	cancel()
+	h.installGitChart()
+	// TODO should wait for ssh port to be open
+	time.Sleep(5 * time.Second)
 
+	privkey := filepath.Join(h.workdir.root, "ssh/id_rsa")
 	h.gitAPI = mustNewGit(t, repodir,
-		fmt.Sprintf(`ssh -i %s -o UserKnownHostsFile=%s`, h.sshKeyPath(), h.knownHostsPath()),
+		fmt.Sprintf(`ssh -i %s -o UserKnownHostsFile=%s`, privkey, h.knownHostsPath()),
 		h.gitURL())
+
 	return h
 }
 
-func (h *harness) initGitRepoOnNode(ctx context.Context) {
-	h.clusterAPI.sshToNode(fmt.Sprintf(
-		`set -e; dir="%s"; if [ -d "$dir" ]; then rm -rf "$dir"; fi; git init --bare "$dir"`,
-		gitRepoPathOnNode))
-}
-
 func (h *harness) gitURL() string {
-	return fmt.Sprintf("ssh://docker@%s%s", h.clusterIP, gitRepoPathOnNode)
+	return fmt.Sprintf("ssh://git@%s:30022%s", h.clusterIP, gitRepoPath)
 }
 
 func (h *harness) fluxURL() string {
@@ -146,6 +142,7 @@ func (h *harness) deployViaGit(ctx context.Context) {
 }
 
 func (h *harness) waitForSync(ctx context.Context, targetRevSource string) {
+	h.t.Helper()
 	h.must(until(ctx, func(ictx context.Context) error {
 		h.mustFetch()
 		targetRev, err := h.revlist("-n", "1", targetRevSource)

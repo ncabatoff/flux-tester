@@ -19,6 +19,7 @@ const (
 	fluxOperatorImage = "quay.io/weaveworks/helm-operator:latest"
 	fluxNamespace     = "flux"
 	helmFluxRelease   = "cd"
+	helmGitRelease    = "git"
 )
 
 type (
@@ -70,20 +71,32 @@ func (s *setup) must(err error) {
 }
 
 func (s *setup) ssh(namespace string) {
-	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", s.clusterIP)
+	knownHostsContent := execNoErr(context.TODO(), nil, "ssh-keyscan", "-p", "30022", s.clusterIP)
 	ioutil.WriteFile(s.knownHostsPath(), []byte(knownHostsContent), 0600)
 
+	// TODO namespace creation doesn't belong here, move somewhere more appropriate
 	s.kubectlAPI.create("", "namespace", namespace)
+
+	sshDir := filepath.Join(s.workdir.root, "ssh")
+	_ = os.Mkdir(sshDir, 0700)
+	privkey := filepath.Join(sshDir, "id_rsa")
+	pubkey := privkey + ".pub"
+	execNoErr(context.Background(), nil, "ssh-keygen", "-t", "rsa", "-N", "", "-f", privkey)
 
 	secretName := "flux-git-deploy"
 	s.kubectlAPI.delete(namespace, "secret", secretName)
 	s.must(s.kubectlAPI.create(namespace, "secret", "generic", secretName, "--from-file",
-		fmt.Sprintf("identity=%s", s.sshKeyPath())))
+		fmt.Sprintf("identity=%s", privkey)))
 
 	configMapName := "ssh-known-hosts"
 	s.kubectlAPI.delete(namespace, "configmap", configMapName)
 	s.must(s.kubectlAPI.create(namespace, "configmap", configMapName, "--from-file",
 		fmt.Sprintf("known_hosts=%s", s.knownHostsPath())))
+
+	pubkeyConfigMap := "ssh-public-keys"
+	s.kubectlAPI.delete(namespace, "configmap", pubkeyConfigMap)
+	s.must(s.kubectlAPI.create(namespace, "configmap", pubkeyConfigMap, "--from-file",
+		fmt.Sprintf("me.pub=%s", pubkey)))
 }
 
 func setupPath() {
@@ -106,12 +119,14 @@ func TestMain(m *testing.M) {
 			"don't delete workdir on exit")
 		flagStartMinikube = flag.Bool("start-minikube", false,
 			"start minikube (or delete and start if it already exists)")
+		flagMinikubeDriver = flag.String("minikube-driver", "",
+			"minikube driver to use")
 		flagMinikubeProfile = flag.String("minikube-profile", "minikube",
 			"minikube profile to use, don't change until we have a fix for https://github.com/kubernetes/minikube/issues/2717")
 	)
 	flag.Parse()
-	log.Printf("Testing with keep-workdir=%v, start-minikube=%v, minikube-profile=%v",
-		*flagKeepWorkdir, *flagStartMinikube, *flagMinikubeProfile)
+	log.Printf("Testing with keep-workdir=%v, start-minikube=%v, minikube-driver=%v, minikube-profile=%v",
+		*flagKeepWorkdir, *flagStartMinikube, *flagMinikubeDriver, *flagMinikubeProfile)
 
 	setupPath()
 
@@ -123,7 +138,7 @@ func TestMain(m *testing.M) {
 	minikube := mustNewMinikube(stdLogger{}, *flagMinikubeProfile)
 	if *flagStartMinikube {
 		minikube.delete()
-		minikube.start()
+		minikube.start(*flagMinikubeDriver)
 		// This sleep is a hack until we find a better way to determine
 		// when the cluster is stable.
 		time.Sleep(60 * time.Second)
@@ -135,8 +150,10 @@ func TestMain(m *testing.M) {
 	global.helmAPI = mustNewHelm(stdLogger{}, *flagMinikubeProfile,
 		global.workdir.root, global.kubectlAPI)
 
-	global.loadDockerImage(fluxImage)
-	global.loadDockerImage(fluxOperatorImage)
+	if *flagMinikubeDriver != "none" {
+		global.loadDockerImage(fluxImage)
+		global.loadDockerImage(fluxOperatorImage)
+	}
 
 	global.ssh(fluxNamespace)
 

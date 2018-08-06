@@ -29,9 +29,7 @@ type (
 	}
 
 	clusterAPI interface {
-		sshKeyPath() string
 		loadDockerImage(string)
-		sshToNode(cmd string) error
 		nodeIP() string
 	}
 )
@@ -54,10 +52,6 @@ func (mt minikubeTool) startCmd() []string {
 
 func (mt minikubeTool) ipCmd() []string {
 	return append(mt.common(), "ip")
-}
-
-func (mt minikubeTool) sshCmd(cmd string) []string {
-	return append(mt.common(), []string{"ssh", "--", cmd}...)
 }
 
 func (mt minikubeTool) dockerEnvCmd() []string {
@@ -95,25 +89,21 @@ func (m minikube) delete() {
 	m.cli().run(context.Background(), m.mt.deleteCmd()...)
 }
 
-func (m minikube) start() {
-	m.cli().must(context.Background(), append(m.mt.startCmd(), []string{
-		"--bootstrapper", "kubeadm",
-		"--keep-context", "--kubernetes-version", k8sVersion}...)...)
-}
-
-func (m minikube) sshKeyPath() string {
-	return fmt.Sprintf("%s/.minikube/machines/%s/id_rsa", homedir(), m.mt.profile)
+func (m minikube) start(driver string) {
+	var args []string
+	if driver != "" {
+		args = append(args, []string{"--vm-driver", driver}...)
+	}
+	m.cli().must(context.Background(), append(m.mt.startCmd(),
+		append(args, []string{
+			"--bootstrapper", "kubeadm",
+			"--keep-context", "--kubernetes-version", k8sVersion}...)...)...)
 }
 
 func (m minikube) loadDockerImage(imageName string) {
 	shcmd := fmt.Sprintf(`docker save %s | (eval $(%s) && docker load)`, imageName,
 		strings.Join(m.mt.dockerEnvCmd(), " "))
 	m.cli().must(context.Background(), "sh", "-c", shcmd)
-}
-
-func (m minikube) sshToNode(cmd string) error {
-	_, err := m.cli().run(context.Background(), m.mt.sshCmd(cmd)...)
-	return err
 }
 
 func (m minikube) nodeIP() string {

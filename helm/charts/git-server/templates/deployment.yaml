@@ -1,0 +1,51 @@
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: {{ template "git-server.fullname" . }}
+  labels:
+    app: {{ template "git-server.name" . }}
+    chart: {{ template "git-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "git-server.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "git-server.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      volumes:
+      - name: git-repos
+        emptyDir: {}
+      - name: git-keys
+        configMap:
+          name: ssh-public-keys
+      initContainers:
+        - name: git-init
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ['git', 'init', '--bare', '/git-server/repos/repo.git']
+          securityContext:
+            runAsUser: 1 # Any non-root user will do. Match to the workload.
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: git-repos
+              mountPath: /git-server/repos
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: ssh
+              containerPort: 22
+              protocol: TCP
+          volumeMounts:
+          - name: git-repos
+            mountPath: /git-server/repos
+          - name: git-keys
+            mountPath: /git-server/keys
+            readOnly: true

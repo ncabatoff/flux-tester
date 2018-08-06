@@ -30,10 +30,6 @@ func (gt gitTool) common() []string {
 	return []string{"git", "-C", gt.repodir}
 }
 
-func (gt gitTool) initCmd() []string {
-	return []string{"git", "init", gt.repodir}
-}
-
 func (gt gitTool) cloneCmd(originURL string) []string {
 	return []string{"git", "clone", originURL, gt.repodir}
 }
