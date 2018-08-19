@@ -28,4 +28,6 @@ jobs:
       - run:
           command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/download-prereqs.sh
       - run:
-          command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/bin/minikube config set WantKubectlDownloadMsg false
+          command: echo 'export PATH=/tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/bin:$PATH' >> $BASH_ENV
+      - run:
+          command: minikube config set WantKubectlDownloadMsg false
