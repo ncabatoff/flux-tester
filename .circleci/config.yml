@@ -31,3 +31,11 @@ jobs:
           command: echo 'export PATH=/tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/bin:$PATH' >> $BASH_ENV
       - run:
           command: minikube config set WantKubectlDownloadMsg false
+      - run:
+          command: sudo -E minikube start --kubernetes-version v1.10.6 --vm-driver=none --bootstrapper=kubeadm
+      - run:
+          command: for i in {1..150}; do if kubectl get pods --all-namespaces; then break; fi; sleep 5; done
+      - run:
+          command: go test -v -tags integration_test -minikube-driver none $CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
+      - run:
+          command: kubectl logs -n flux -l app=weave-flux-helm-operator
