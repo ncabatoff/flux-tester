@@ -20,12 +20,12 @@ jobs:
       - run:
           command: chmod +x $HOME/dep
       - run:
+          command: cd /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME && $HOME/dep ensure
+      - run:
           command: mkdir -p $HOME/.kube
       - run:
           command: touch $HOME/.kube/config
       - run:
           command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/download-prereqs.sh
-      - run:
-          command: $HOME/dep ensure
       - run:
           command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/bin/minikube config set WantKubectlDownloadMsg false
