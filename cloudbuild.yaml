@@ -1,14 +1,14 @@
 steps:
-- name: 'gcr.io/cloud-builders/kubectl'
+- name: gcr.io/cloud-builders/kubectl
   args: ['get', 'pods']
   env:
   - 'CLOUDSDK_COMPUTE_ZONE=us-central1-a'
   - 'CLOUDSDK_CONTAINER_CLUSTER=cluster-1'
-- name: ubuntu
-  args: ['bash', '-c', 'apt-get -qq update; apt-get install -y curl; ./download-prereqs.sh']
 - name: gcr.io/cloud-builders/curl
-  args: ['https://github.com/golang/dep/releases/download/v0.5.0/dep-linux-amd64', '-o', './dep' ]
+  args: ['-L', '-s', 'https://github.com/golang/dep/releases/download/v0.5.0/dep-linux-amd64', '-o', './dep' ]
 - name: ubuntu
   args: ['bash', '-c', 'chmod +rx ./dep']
 - name: ubuntu
   args: ["./dep", 'ensure']
+- name: ubuntu
+  args: ['bash', '-c', 'apt-get -qq update; apt-get install -y curl; ./download-prereqs.sh']
