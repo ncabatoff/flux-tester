@@ -7,8 +7,10 @@ jobs:
       MINIKUBE_WANTUPDATENOTIFICATION: false
       MINIKUBE_WANTREPORTERRORPROMPT: false
       CHANGE_MINIKUBE_NONE_USER: true
+      GOPATH: /tmp/go
     steps:
-      - checkout
+      - checkout:
+          path: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
       - run:
           command: sudo apt-get -qq update
       - run:
@@ -22,8 +24,8 @@ jobs:
       - run:
           command: touch $HOME/.kube/config
       - run:
-          command: ./download-prereqs.sh
+          command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/download-prereqs.sh
       - run:
-          command: ./dep ensure
+          command: $HOME/dep ensure
       - run:
-          command: ./bin/minikube config set WantKubectlDownloadMsg false
+          command: /tmp/go/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/bin/minikube config set WantKubectlDownloadMsg false
