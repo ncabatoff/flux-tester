@@ -32,7 +32,7 @@ jobs:
       - run:
           command: minikube config set WantKubectlDownloadMsg false
       - run:
-          command: sudo -E minikube start --kubernetes-version v1.10.6 --vm-driver=none --bootstrapper=kubeadm
+          command: sudo -E `which minikube` start --kubernetes-version v1.10.6 --vm-driver=none --bootstrapper=kubeadm
       - run:
           command: for i in {1..150}; do if kubectl get pods --all-namespaces; then break; fi; sleep 5; done
       - run:
